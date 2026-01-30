@@ -1,590 +1,78 @@
 'use client';
 
-import { useState } from 'react';
-
-interface Vulnerability {
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  file: string;
-  line?: number;
-  issue: string;
-  description: string;
-  recommendation: string;
-}
-
-interface ScanResult {
-  success: boolean;
-  vulnerabilities: Vulnerability[];
-  markdown: string;
-  filesScanned: number;
-  repository: string;
-}
-
-interface ScriptResult {
-  success: boolean;
-  script: string;
-  wordCount: number;
-  estimatedDuration: number;
-  filename: string;
-  warning: string | null;
-}
+import MacBookScreen from './components/MacBookScreen';
+import Image from 'next/image';
 
 export default function Home() {
-  const [repoUrl, setRepoUrl] = useState('');
-  const [model, setModel] = useState('anthropic/claude-3.5-sonnet');
-  const [apiKey, setApiKey] = useState('');
-  const [githubToken, setGithubToken] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ScanResult | null>(null);
-  const [error, setError] = useState('');
-  const [scriptResult, setScriptResult] = useState<ScriptResult | null>(null);
-  const [scriptError, setScriptError] = useState('');
-
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    setScriptError('');
-    setResult(null);
-    setScriptResult(null);
-
-    try {
-      // Step 1: Scan for vulnerabilities
-      const scanResponse = await fetch('/api/vulnfinder', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          repoUrl,
-          model,
-          ...(apiKey && { openRouterApiKey: apiKey }),
-          ...(githubToken && { githubToken }),
-        }),
-      });
-
-      const scanData = await scanResponse.json();
-
-      if (!scanResponse.ok) {
-        throw new Error(scanData.error || 'Failed to scan repository');
-      }
-
-      setResult(scanData);
-
-      // Step 2: Automatically generate video script from the markdown
-      try {
-        const scriptResponse = await fetch('/api/summarizer', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            markdownContent: scanData.markdown,
-            model,
-            ...(apiKey && { openRouterApiKey: apiKey }),
-          }),
-        });
-
-        const scriptData = await scriptResponse.json();
-
-        if (scriptResponse.ok) {
-          setScriptResult(scriptData);
-        } else {
-          setScriptError(scriptData.error || 'Failed to generate script');
-        }
-      } catch (scriptErr) {
-        setScriptError(scriptErr instanceof Error ? scriptErr.message : 'Failed to generate script');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
+  // Get current date/time formatted like "January 30th, 2026 at 11:27 AM"
+  const now = new Date();
+  const month = now.toLocaleString('en-US', { month: 'long' });
+  const day = now.getDate();
+  const year = now.getFullYear();
+  const time = now.toLocaleString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit', 
+    hour12: true 
+  });
+  
+  // Add ordinal suffix (st, nd, rd, th)
+  const getOrdinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
   };
-
-  const downloadMarkdown = () => {
-    if (!result) return;
-    const blob = new Blob([result.markdown], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `security-report-${Date.now()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const downloadScript = () => {
-    if (!scriptResult) return;
-    const blob = new Blob([scriptResult.script], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = scriptResult.filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return 'text-red-600 dark:text-red-400';
-      case 'high':
-        return 'text-orange-600 dark:text-orange-400';
-      case 'medium':
-        return 'text-yellow-600 dark:text-yellow-400';
-      case 'low':
-        return 'text-green-600 dark:text-green-400';
-      default:
-        return 'text-zinc-600 dark:text-zinc-400';
-    }
-  };
-
-  const getSeverityBg = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return 'bg-red-100 dark:bg-red-900/20 border-red-300 dark:border-red-800';
-      case 'high':
-        return 'bg-orange-100 dark:bg-orange-900/20 border-orange-300 dark:border-orange-800';
-      case 'medium':
-        return 'bg-yellow-100 dark:bg-yellow-900/20 border-yellow-300 dark:border-yellow-800';
-      case 'low':
-        return 'bg-green-100 dark:bg-green-900/20 border-green-300 dark:border-green-800';
-      default:
-        return 'bg-zinc-100 dark:bg-zinc-900/20 border-zinc-300 dark:border-zinc-800';
-    }
-  };
-
-  const severityCounts = result?.vulnerabilities.reduce(
-    (acc, v) => {
-      acc[v.severity] = (acc[v.severity] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  
+  const formattedDate = `Modified ${month} ${getOrdinal(day)}, ${year} at ${time}`;
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 font-sans">
-      <main className="container mx-auto px-4 py-12 max-w-6xl">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-3">
-            🔍 Vulnerability Scanner + Video Script Generator
-          </h1>
-          <p className="text-lg text-zinc-600 dark:text-zinc-400">
-            Scan repos for vulnerabilities and auto-generate 60s video scripts
-          </p>
-        </div>
-
-        {/* Scan Form */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg p-8 mb-8">
-          <form onSubmit={handleScan} className="space-y-6">
-            <div>
-              <label
-                htmlFor="repoUrl"
-                className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
-              >
-                GitHub Repository URL *
-              </label>
-              <input
-                id="repoUrl"
-                type="text"
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                placeholder="https://github.com/owner/repo"
-                required
-                className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+    <MacBookScreen className="h-[50vh] w-2/3 max-w-6xl mx-auto">
+      <div className="flex items-center justify-center w-full h-full">
+        <div className="flex flex-col items-start gap-4 w-full max-w-lg px-4">
+          {/* File icon and title section */}
+          <div className="flex flex-row items-center w-full">
+            {/* File icon - 1/4 width */}
+            <div className="w-24 h-24 flex items-center justify-start">
+              <Image 
+                src="/file-icon.png" 
+                alt="File icon" 
+                width={80} 
+                height={80}
               />
             </div>
-
-            <div>
-              <label
-                htmlFor="model"
-                className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
-              >
-                AI Model
-              </label>
-              <select
-                id="model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-              >
-                <option value="anthropic/claude-3.5-sonnet">
-                  Claude 3.5 Sonnet (Recommended)
-                </option>
-                <option value="anthropic/claude-3-opus">Claude 3 Opus</option>
-                <option value="openai/gpt-4o">GPT-4o</option>
-                <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
-                <option value="google/gemini-pro-1.5">Gemini Pro 1.5</option>
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label
-                  htmlFor="apiKey"
-                  className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
-                >
-                  OpenRouter API Key{' '}
-                  <span className="text-zinc-500 font-normal">
-                    (optional if set in .env.local)
-                  </span>
-                </label>
-                <input
-                  id="apiKey"
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-or-v1-..."
-                  className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-                />
-                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                  Get your key at{' '}
-                  <a
-                    href="https://openrouter.ai/keys"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    openrouter.ai/keys
-                  </a>
-                </p>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="githubToken"
-                  className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
-                >
-                  GitHub Token{' '}
-                  <span className="text-zinc-500 font-normal">
-                    (optional, avoids rate limits)
-                  </span>
-                </label>
-                <input
-                  id="githubToken"
-                  type="password"
-                  value={githubToken}
-                  onChange={(e) => setGithubToken(e.target.value)}
-                  placeholder="ghp_..."
-                  className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-                />
-                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                  Get a token at{' '}
-                  <a
-                    href="https://github.com/settings/tokens"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    github.com/settings/tokens
-                  </a>
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || !repoUrl}
-              className="w-full py-3 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-400 dark:disabled:bg-zinc-700 text-white font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg
-                    className="animate-spin h-5 w-5"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  Scanning & Generating Script...
+            
+            {/* Text content - 3/4 width */}
+            <div className="w-3/4 flex flex-col">
+              <h1 className="text-5xl">
+                <span className="font-medium" style={{ fontFamily: 'var(--font-rethink-sans)' }}>
+                  niche
                 </span>
-              ) : (
-                '🚀 Scan & Generate Video Script'
-              )}
-            </button>
-          </form>
+                <span className="font-bold" style={{ fontFamily: 'var(--font-rethink-sans)' }}>
+                  .files
+                </span>
+              </h1>
+              <p className="text-sm text-zinc-600" style={{ fontFamily: 'var(--font-inter)' }}>
+                {formattedDate}
+              </p>
+            </div>
+          </div>
+
+          {/* GitHub input */}
+          <div className="w-full">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+                <svg className="w-5 h-5 text-zinc-400" fill="currentColor" viewBox="0 0 24 24">
+                  <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                placeholder="Enter GitHub Link"
+                className="w-full pl-12 pr-4 py-3 rounded-lg border border-zinc-300 bg-white/80 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          </div>
         </div>
-
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg p-4 mb-8">
-            <p className="text-red-800 dark:text-red-300 font-medium">
-              ❌ {error}
-            </p>
-          </div>
-        )}
-
-        {/* Results */}
-        {result && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left Column: Vulnerability Results */}
-            <div className="space-y-6">
-              {/* Summary Cards */}
-              <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg p-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-                  Scan Results
-                </h2>
-                <button
-                  onClick={downloadMarkdown}
-                  className="flex items-center gap-2 px-4 py-2 bg-zinc-800 dark:bg-zinc-700 text-white rounded-lg hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-colors"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  Download Report
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-4 text-center">
-                  <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-                    {result.vulnerabilities.length}
-                  </p>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    Total Issues
-                  </p>
-                </div>
-                <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 text-center">
-                  <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    {severityCounts?.critical || 0}
-                  </p>
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    Critical
-                  </p>
-                </div>
-                <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4 text-center">
-                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                    {severityCounts?.high || 0}
-                  </p>
-                  <p className="text-sm text-orange-600 dark:text-orange-400">
-                    High
-                  </p>
-                </div>
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4 text-center">
-                  <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                    {severityCounts?.medium || 0}
-                  </p>
-                  <p className="text-sm text-yellow-600 dark:text-yellow-400">
-                    Medium
-                  </p>
-                </div>
-                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center">
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {severityCounts?.low || 0}
-                  </p>
-                  <p className="text-sm text-green-600 dark:text-green-400">
-                    Low
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
-                <span>📦 Repository: {result.repository}</span>
-                <span>•</span>
-                <span>📄 Files Scanned: {result.filesScanned}</span>
-              </div>
-              </div>
-
-              {/* Vulnerabilities List */}
-              {result.vulnerabilities.length > 0 ? (
-                <div className="space-y-4">
-                {result.vulnerabilities.map((vuln, index) => (
-                  <div
-                    key={index}
-                    className={`border rounded-xl p-6 ${getSeverityBg(
-                      vuln.severity
-                    )}`}
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${getSeverityColor(
-                              vuln.severity
-                            )} bg-white dark:bg-zinc-900`}
-                          >
-                            {vuln.severity}
-                          </span>
-                          <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                            {vuln.issue}
-                          </h3>
-                        </div>
-                        <p className="text-sm text-zinc-700 dark:text-zinc-300 font-mono mb-2">
-                          📁 {vuln.file}
-                          {vuln.line && ` (Line ~${vuln.line})`}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-1">
-                          Description:
-                        </p>
-                        <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                          {vuln.description}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-1">
-                          Recommendation:
-                        </p>
-                        <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                          {vuln.recommendation}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                </div>
-              ) : (
-                <div className="bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-800 rounded-xl p-8 text-center">
-                  <p className="text-2xl mb-2">✅</p>
-                  <p className="text-lg font-semibold text-green-800 dark:text-green-300 mb-2">
-                    No Vulnerabilities Detected!
-                  </p>
-                  <p className="text-sm text-green-700 dark:text-green-400">
-                    Great job! No obvious security issues were found in this scan.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Right Column: Video Script */}
-            <div className="space-y-6">
-              {scriptError && (
-                <div className="bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg p-4">
-                  <p className="text-red-800 dark:text-red-300 font-medium text-sm">
-                    ❌ {scriptError}
-                  </p>
-                </div>
-              )}
-
-              {scriptResult ? (
-                <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg p-8">
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-                      🎬 Video Script
-                    </h2>
-                    <button
-                      onClick={downloadScript}
-                      className="flex items-center gap-2 px-4 py-2 bg-zinc-800 dark:bg-zinc-700 text-white rounded-lg hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-colors"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                        />
-                      </svg>
-                      Download (.txt)
-                    </button>
-                  </div>
-
-                  {/* Stats */}
-                  <div className="grid grid-cols-3 gap-3 mb-6">
-                    <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3 text-center">
-                      <p className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
-                        {scriptResult.wordCount}
-                      </p>
-                      <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                        Words
-                      </p>
-                    </div>
-                    <div className={`rounded-lg p-3 text-center ${
-                      scriptResult.estimatedDuration > 65 
-                        ? 'bg-orange-50 dark:bg-orange-900/20' 
-                        : 'bg-green-50 dark:bg-green-900/20'
-                    }`}>
-                      <p className={`text-xl font-bold ${
-                        scriptResult.estimatedDuration > 65 
-                          ? 'text-orange-600 dark:text-orange-400' 
-                          : 'text-green-600 dark:text-green-400'
-                      }`}>
-                        {scriptResult.estimatedDuration}s
-                      </p>
-                      <p className={`text-xs ${
-                        scriptResult.estimatedDuration > 65 
-                          ? 'text-orange-600 dark:text-orange-400' 
-                          : 'text-green-600 dark:text-green-400'
-                      }`}>
-                        Duration
-                      </p>
-                    </div>
-                    <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3 text-center">
-                      <p className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
-                        🎯
-                      </p>
-                      <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                        TTS Ready
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Warning if over 60s */}
-                  {scriptResult.warning && (
-                    <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-300 dark:border-orange-800 rounded-lg p-3 mb-4">
-                      <p className="text-orange-800 dark:text-orange-300 font-medium text-sm">
-                        ⚠️ {scriptResult.warning}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Script Content */}
-                  <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6 border border-zinc-200 dark:border-zinc-700">
-                    <pre className="whitespace-pre-wrap font-sans text-zinc-900 dark:text-zinc-100 leading-relaxed text-sm">
-                      {scriptResult.script}
-                    </pre>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 p-12 text-center">
-                  <div className="text-5xl mb-4">🎬</div>
-                  <h3 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50 mb-2">
-                    Video Script
-                  </h3>
-                  <p className="text-zinc-600 dark:text-zinc-400">
-                    Your 60-second roast-style video script will appear here
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
+      </div>
+    </MacBookScreen>
   );
 }

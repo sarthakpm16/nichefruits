@@ -19,22 +19,37 @@ interface ScanResult {
   repository: string;
 }
 
+interface ScriptResult {
+  success: boolean;
+  script: string;
+  wordCount: number;
+  estimatedDuration: number;
+  filename: string;
+  warning: string | null;
+}
+
 export default function Home() {
   const [repoUrl, setRepoUrl] = useState('');
   const [model, setModel] = useState('anthropic/claude-3.5-sonnet');
   const [apiKey, setApiKey] = useState('');
+  const [githubToken, setGithubToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState('');
+  const [scriptResult, setScriptResult] = useState<ScriptResult | null>(null);
+  const [scriptError, setScriptError] = useState('');
 
   const handleScan = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setScriptError('');
     setResult(null);
+    setScriptResult(null);
 
     try {
-      const response = await fetch('/api/vulnfinder', {
+      // Step 1: Scan for vulnerabilities
+      const scanResponse = await fetch('/api/vulnfinder', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -43,16 +58,42 @@ export default function Home() {
           repoUrl,
           model,
           ...(apiKey && { openRouterApiKey: apiKey }),
+          ...(githubToken && { githubToken }),
         }),
       });
 
-      const data = await response.json();
+      const scanData = await scanResponse.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to scan repository');
+      if (!scanResponse.ok) {
+        throw new Error(scanData.error || 'Failed to scan repository');
       }
 
-      setResult(data);
+      setResult(scanData);
+
+      // Step 2: Automatically generate video script from the markdown
+      try {
+        const scriptResponse = await fetch('/api/summarizer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            markdownContent: scanData.markdown,
+            model,
+            ...(apiKey && { openRouterApiKey: apiKey }),
+          }),
+        });
+
+        const scriptData = await scriptResponse.json();
+
+        if (scriptResponse.ok) {
+          setScriptResult(scriptData);
+        } else {
+          setScriptError(scriptData.error || 'Failed to generate script');
+        }
+      } catch (scriptErr) {
+        setScriptError(scriptErr instanceof Error ? scriptErr.message : 'Failed to generate script');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -67,6 +108,17 @@ export default function Home() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `security-report-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadScript = () => {
+    if (!scriptResult) return;
+    const blob = new Blob([scriptResult.script], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = scriptResult.filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -115,10 +167,10 @@ export default function Home() {
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-3">
-            🔍 Vulnerability Scanner
+            🔍 Vulnerability Scanner + Video Script Generator
           </h1>
           <p className="text-lg text-zinc-600 dark:text-zinc-400">
-            AI-powered security analysis for GitHub repositories
+            Scan repos for vulnerabilities and auto-generate 60s video scripts
           </p>
         </div>
 
@@ -166,35 +218,68 @@ export default function Home() {
               </select>
             </div>
 
-            <div>
-              <label
-                htmlFor="apiKey"
-                className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
-              >
-                OpenRouter API Key{' '}
-                <span className="text-zinc-500 font-normal">
-                  (optional if set in .env.local)
-                </span>
-              </label>
-              <input
-                id="apiKey"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-or-v1-..."
-                className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-              />
-              <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                Get your key at{' '}
-                <a
-                  href="https://openrouter.ai/keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 dark:text-blue-400 hover:underline"
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label
+                  htmlFor="apiKey"
+                  className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
                 >
-                  openrouter.ai/keys
-                </a>
-              </p>
+                  OpenRouter API Key{' '}
+                  <span className="text-zinc-500 font-normal">
+                    (optional if set in .env.local)
+                  </span>
+                </label>
+                <input
+                  id="apiKey"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-or-v1-..."
+                  className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                />
+                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                  Get your key at{' '}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    openrouter.ai/keys
+                  </a>
+                </p>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="githubToken"
+                  className="block text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2"
+                >
+                  GitHub Token{' '}
+                  <span className="text-zinc-500 font-normal">
+                    (optional, avoids rate limits)
+                  </span>
+                </label>
+                <input
+                  id="githubToken"
+                  type="password"
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder="ghp_..."
+                  className="w-full px-4 py-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                />
+                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                  Get a token at{' '}
+                  <a
+                    href="https://github.com/settings/tokens"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    github.com/settings/tokens
+                  </a>
+                </p>
+              </div>
             </div>
 
             <button
@@ -224,10 +309,10 @@ export default function Home() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
-                  Scanning Repository...
+                  Scanning & Generating Script...
                 </span>
               ) : (
-                'Scan for Vulnerabilities'
+                '🚀 Scan & Generate Video Script'
               )}
             </button>
           </form>
@@ -244,9 +329,11 @@ export default function Home() {
 
         {/* Results */}
         {result && (
-          <div className="space-y-6">
-            {/* Summary Cards */}
-            <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg p-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column: Vulnerability Results */}
+            <div className="space-y-6">
+              {/* Summary Cards */}
+              <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg p-8">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
                   Scan Results
@@ -321,11 +408,11 @@ export default function Home() {
                 <span>•</span>
                 <span>📄 Files Scanned: {result.filesScanned}</span>
               </div>
-            </div>
+              </div>
 
-            {/* Vulnerabilities List */}
-            {result.vulnerabilities.length > 0 ? (
-              <div className="space-y-4">
+              {/* Vulnerabilities List */}
+              {result.vulnerabilities.length > 0 ? (
+                <div className="space-y-4">
                 {result.vulnerabilities.map((vuln, index) => (
                   <div
                     key={index}
@@ -375,18 +462,126 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
-              </div>
-            ) : (
-              <div className="bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-800 rounded-xl p-8 text-center">
-                <p className="text-2xl mb-2">✅</p>
-                <p className="text-lg font-semibold text-green-800 dark:text-green-300 mb-2">
-                  No Vulnerabilities Detected!
-                </p>
-                <p className="text-sm text-green-700 dark:text-green-400">
-                  Great job! No obvious security issues were found in this scan.
-                </p>
-              </div>
-            )}
+                </div>
+              ) : (
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-800 rounded-xl p-8 text-center">
+                  <p className="text-2xl mb-2">✅</p>
+                  <p className="text-lg font-semibold text-green-800 dark:text-green-300 mb-2">
+                    No Vulnerabilities Detected!
+                  </p>
+                  <p className="text-sm text-green-700 dark:text-green-400">
+                    Great job! No obvious security issues were found in this scan.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Video Script */}
+            <div className="space-y-6">
+              {scriptError && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg p-4">
+                  <p className="text-red-800 dark:text-red-300 font-medium text-sm">
+                    ❌ {scriptError}
+                  </p>
+                </div>
+              )}
+
+              {scriptResult ? (
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg p-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+                      🎬 Video Script
+                    </h2>
+                    <button
+                      onClick={downloadScript}
+                      className="flex items-center gap-2 px-4 py-2 bg-zinc-800 dark:bg-zinc-700 text-white rounded-lg hover:bg-zinc-700 dark:hover:bg-zinc-600 transition-colors"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
+                      Download (.txt)
+                    </button>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3 text-center">
+                      <p className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
+                        {scriptResult.wordCount}
+                      </p>
+                      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                        Words
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-3 text-center ${
+                      scriptResult.estimatedDuration > 65 
+                        ? 'bg-orange-50 dark:bg-orange-900/20' 
+                        : 'bg-green-50 dark:bg-green-900/20'
+                    }`}>
+                      <p className={`text-xl font-bold ${
+                        scriptResult.estimatedDuration > 65 
+                          ? 'text-orange-600 dark:text-orange-400' 
+                          : 'text-green-600 dark:text-green-400'
+                      }`}>
+                        {scriptResult.estimatedDuration}s
+                      </p>
+                      <p className={`text-xs ${
+                        scriptResult.estimatedDuration > 65 
+                          ? 'text-orange-600 dark:text-orange-400' 
+                          : 'text-green-600 dark:text-green-400'
+                      }`}>
+                        Duration
+                      </p>
+                    </div>
+                    <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-3 text-center">
+                      <p className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
+                        🎯
+                      </p>
+                      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                        TTS Ready
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Warning if over 60s */}
+                  {scriptResult.warning && (
+                    <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-300 dark:border-orange-800 rounded-lg p-3 mb-4">
+                      <p className="text-orange-800 dark:text-orange-300 font-medium text-sm">
+                        ⚠️ {scriptResult.warning}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Script Content */}
+                  <div className="bg-zinc-50 dark:bg-zinc-800 rounded-lg p-6 border border-zinc-200 dark:border-zinc-700">
+                    <pre className="whitespace-pre-wrap font-sans text-zinc-900 dark:text-zinc-100 leading-relaxed text-sm">
+                      {scriptResult.script}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-zinc-50 dark:bg-zinc-800 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 p-12 text-center">
+                  <div className="text-5xl mb-4">🎬</div>
+                  <h3 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50 mb-2">
+                    Video Script
+                  </h3>
+                  <p className="text-zinc-600 dark:text-zinc-400">
+                    Your 60-second roast-style video script will appear here
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>

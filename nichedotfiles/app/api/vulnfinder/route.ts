@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { generateVulnerabilityPrompt } from './prompt';
 
 interface VulnerabilityFinderRequest {
   repoUrl: string;
   model?: string;
   openRouterApiKey?: string;
+  githubToken?: string;
 }
 
 interface FileContent {
@@ -39,22 +41,27 @@ function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
 }
 
 // Fetch repository tree from GitHub API
-async function fetchRepoTree(owner: string, repo: string, branch: string = 'main'): Promise<any> {
+async function fetchRepoTree(owner: string, repo: string, githubToken?: string, branch: string = 'main'): Promise<any> {
   try {
+    const headers: Record<string, string> = {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'Vulnerability-Scanner',
+    };
+
+    // Add authentication if token is provided
+    if (githubToken) {
+      headers['Authorization'] = `Bearer ${githubToken}`;
+    }
+
     const response = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
-      {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Vulnerability-Scanner',
-        },
-      }
+      { headers }
     );
 
     if (!response.ok) {
       // Try 'master' if 'main' fails
       if (branch === 'main') {
-        return fetchRepoTree(owner, repo, 'master');
+        return fetchRepoTree(owner, repo, githubToken, 'master');
       }
       throw new Error(`GitHub API error: ${response.statusText}`);
     }
@@ -66,16 +73,21 @@ async function fetchRepoTree(owner: string, repo: string, branch: string = 'main
 }
 
 // Fetch file content from GitHub
-async function fetchFileContent(owner: string, repo: string, path: string): Promise<string> {
+async function fetchFileContent(owner: string, repo: string, path: string, githubToken?: string): Promise<string> {
   try {
+    const headers: Record<string, string> = {
+      'Accept': 'application/vnd.github.v3.raw',
+      'User-Agent': 'Vulnerability-Scanner',
+    };
+
+    // Add authentication if token is provided
+    if (githubToken) {
+      headers['Authorization'] = `Bearer ${githubToken}`;
+    }
+
     const response = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-      {
-        headers: {
-          'Accept': 'application/vnd.github.v3.raw',
-          'User-Agent': 'Vulnerability-Scanner',
-        },
-      }
+      { headers }
     );
 
     if (!response.ok) {
@@ -118,47 +130,7 @@ async function analyzeWithLLM(
     `File: ${f.path}\n\`\`\`${f.type}\n${f.content.slice(0, 5000)}\n\`\`\``
   ).join('\n\n');
 
-  const prompt = `You are a security expert analyzing a code repository for vulnerabilities. Analyze the following code files and identify security issues.
-
-Focus on:
-1. Hardcoded API keys, tokens, passwords, or secrets
-2. Exposed environment variables in client-side code
-3. SQL injection vulnerabilities
-4. Cross-Site Scripting (XSS) vulnerabilities
-5. Insecure authentication/authorization
-6. Sensitive data exposure
-7. Missing input validation
-8. Unsafe deserialization
-9. Using components with known vulnerabilities
-10. Insecure direct object references
-11. Security misconfigurations
-12. Insecure cryptographic storage
-13. Insufficient logging and monitoring
-
-Repository Files:
-${codeContext}
-
-Respond ONLY with a valid JSON array of vulnerabilities. Each vulnerability must have:
-- severity: "critical" | "high" | "medium" | "low"
-- file: string (file path)
-- line: number (approximate line number if possible)
-- issue: string (brief title)
-- description: string (detailed explanation)
-- recommendation: string (how to fix)
-
-Example format:
-[
-  {
-    "severity": "critical",
-    "file": "src/config.js",
-    "line": 10,
-    "issue": "Hardcoded API Key",
-    "description": "API key is hardcoded directly in source code",
-    "recommendation": "Move API key to environment variables"
-  }
-]
-
-Return ONLY the JSON array, no other text.`;
+  const prompt = generateVulnerabilityPrompt(codeContext);
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -188,14 +160,25 @@ Return ONLY the JSON array, no other text.`;
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content || '[]';
+    const content = data.choices?.[0]?.message?.content;
+    
+    if (!content) {
+      console.error('No content in LLM response:', data);
+      return [];
+    }
     
     // Extract JSON from the response (in case there's extra text)
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     const jsonStr = jsonMatch ? jsonMatch[0] : content;
     
-    const vulnerabilities = JSON.parse(jsonStr);
-    return vulnerabilities;
+    try {
+      const vulnerabilities = JSON.parse(jsonStr);
+      return Array.isArray(vulnerabilities) ? vulnerabilities : [];
+    } catch (parseError) {
+      console.error('Failed to parse LLM response as JSON:', jsonStr);
+      console.error('Parse error:', parseError);
+      return [];
+    }
   } catch (error) {
     console.error('Error analyzing with LLM:', error);
     throw error;
@@ -301,7 +284,7 @@ critical applications and conduct thorough manual security reviews.
 export async function POST(request: NextRequest) {
   try {
     const body: VulnerabilityFinderRequest = await request.json();
-    const { repoUrl, model = 'anthropic/claude-3.5-sonnet', openRouterApiKey } = body;
+    const { repoUrl, model = 'anthropic/claude-3.5-sonnet', openRouterApiKey, githubToken } = body;
 
     if (!repoUrl) {
       return NextResponse.json(
@@ -330,9 +313,20 @@ export async function POST(request: NextRequest) {
 
     const { owner, repo } = repoInfo;
 
+    // Get GitHub token from request or environment
+    const ghToken = githubToken || process.env.GITHUB_TOKEN;
+
     // Fetch repository structure
     console.log(`Fetching repository: ${owner}/${repo}`);
-    const tree = await fetchRepoTree(owner, repo);
+    const tree = await fetchRepoTree(owner, repo, ghToken);
+
+    // Check if tree data is valid
+    if (!tree || !tree.tree || !Array.isArray(tree.tree)) {
+      return NextResponse.json(
+        { error: 'Failed to fetch repository structure. The repository may be empty or inaccessible.' },
+        { status: 400 }
+      );
+    }
 
     // Filter files to scan
     const filesToScan = tree.tree.filter((item: any) => 
@@ -344,7 +338,7 @@ export async function POST(request: NextRequest) {
     // Fetch file contents
     const fileContents: FileContent[] = [];
     for (const file of filesToScan) {
-      const content = await fetchFileContent(owner, repo, file.path);
+      const content = await fetchFileContent(owner, repo, file.path, ghToken);
       if (content) {
         const extension = file.path.split('.').pop() || '';
         fileContents.push({

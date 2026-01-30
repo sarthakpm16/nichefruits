@@ -375,16 +375,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Requirements */}
-            <div className="text-xs text-zinc-500 p-4 bg-zinc-50 rounded-lg border border-zinc-200">
-              <p className="font-semibold mb-2">Environment Requirements:</p>
-              <ul className="list-disc list-inside space-y-1">
-                <li>OPENROUTER_API_KEY for vulnerability scanning</li>
-                <li>ELEVENLABS_API_KEY for text-to-speech</li>
-                <li>base.mp4 file in video_gen/assets/</li>
-                <li>FFmpeg installed (npm install fluent-ffmpeg ffmpeg-static)</li>
-              </ul>
-            </div>
+           
           </div>
         </div>
       </div>

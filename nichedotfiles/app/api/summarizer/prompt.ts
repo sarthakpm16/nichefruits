@@ -14,6 +14,7 @@ export function generateVideoScriptPrompt(markdownContent: string): string {
   - Only output spoken script text
   - Do not include stage directions, camera notes, or formatting instructions
   - Use line breaks to indicate natural pauses for pacing
+  -do not use asterics because it messes up the audio generation
   
   VULNERABILITY REPORT:
   ${markdownContent}

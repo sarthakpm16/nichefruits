@@ -2,7 +2,9 @@
 
 import MacBookScreen from '../components/MacBookScreen';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
+
+export const dynamic = 'force-dynamic';
 
 interface FileNode {
   name: string;

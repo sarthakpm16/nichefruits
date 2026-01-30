@@ -163,7 +163,7 @@ function FileTreeItem({ node, depth = 0 }: { node: FileNode; depth?: number }) {
   );
 }
 
-export default function CodebasePage() {
+function CodebaseContent() {
   const searchParams = useSearchParams();
   const repoUrl = searchParams.get('repo');
 
@@ -175,5 +175,13 @@ export default function CodebasePage() {
         ))}
       </div>
     </MacBookScreen>
+  );
+}
+
+export default function CodebasePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <CodebaseContent />
+    </Suspense>
   );
 }

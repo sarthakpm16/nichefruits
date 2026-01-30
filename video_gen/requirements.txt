@@ -1,0 +1,6 @@
+moviepy
+elevenlabs
+numpy
+Pillow
+python-dotenv
+opencv-python-headless

@@ -2,8 +2,13 @@
 
 import MacBookScreen from './components/MacBookScreen';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 export default function Home() {
+  const router = useRouter();
+  const [repoUrl, setRepoUrl] = useState('');
+
   // Get current date/time formatted like "January 30th, 2026 at 11:27 AM"
   const now = new Date();
   const month = now.toLocaleString('en-US', { month: 'long' });
@@ -23,6 +28,13 @@ export default function Home() {
   };
   
   const formattedDate = `Modified ${month} ${getOrdinal(day)}, ${year} at ${time}`;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (repoUrl) {
+      router.push(`/codebase?repo=${encodeURIComponent(repoUrl)}`);
+    }
+  };
 
   return (
     <MacBookScreen className="h-[50vh] w-2/3 max-w-6xl mx-auto">
@@ -57,7 +69,7 @@ export default function Home() {
           </div>
 
           {/* GitHub input */}
-          <div className="w-full">
+          <form onSubmit={handleSubmit} className="w-full">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
                 <svg className="w-5 h-5 text-zinc-400" fill="currentColor" viewBox="0 0 24 24">
@@ -66,11 +78,13 @@ export default function Home() {
               </div>
               <input
                 type="text"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder="Enter GitHub Link"
                 className="w-full pl-12 pr-4 py-3 rounded-lg border border-zinc-300 bg-white/80 text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-          </div>
+          </form>
         </div>
       </div>
     </MacBookScreen>
